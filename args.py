@@ -28,23 +28,19 @@ def get_args() -> Namespace:
 
     parser.add_argument("--llm_model", type = str, default = 'daryl149/llama-2-7b-chat-hf', choices = ['daryl149/llama-2-7b-chat-hf', 'meta-llama/Meta-Llama-3-8B-Instruct'], help = "HuggingFace embedding model for LLM.")
     parser.add_argument("--llm_lr", default = 1e-5, type = float, help = "learning rate")
-    parser.add_argument("--ppo_epochs", default = 4, type = int, help = "number of PPO training epochs")
-    parser.add_argument("--batch_size", default = 8, type = int, help = "batch size")
+    parser.add_argument("--ppo_epochs", default = 1, type = int, help = "number of PPO training epochs")
+    parser.add_argument("--batch_size", default = 4, type = int, help = "batch size")
     parser.add_argument("--mini_batch_size", default = 1, type = int, help = "PPO minibatch size")
-    parser.add_argument("--output_max_len", default = 32, type = int, help = "maximum length for LLM generation")
     parser.add_argument("--gradient_accumulation_steps", default = 1, type = int, help = "in ppo training")
     parser.add_argument("--early_stopping", default = False, type = bool, help = "in ppo training")
     parser.add_argument("--target_kl", default = 0.1, type = float, help = "target KL divergence for early stopping")
 
+    # below are LORA specific arguments
     parser.add_argument("--lora_r", default = 16, type = int, help = "")
     parser.add_argument("--lora_alpha", default = 32, type = int, help = "")
     parser.add_argument("--lora_dropout", default = 0.05, type = float, help = "")
 
-    #parser.add_argument("--idx_gpu", default = -1, type = int, help = "which cuda device to use (-1 for cpu training)")
-
     args = parser.parse_args()
-
-    #args.device = "cpu" if args.idx_gpu == -1 else f"cuda:{args.idx_gpu}"
 
     return args
 

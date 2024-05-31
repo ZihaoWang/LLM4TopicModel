@@ -190,6 +190,8 @@ class DataProcessor(object):
         prompt = '''You are a helpful assistant that must try your best effort to summarize {} keywords representing main topic of the CONTENT.
             Your output always starts with "KEYWORDS:", then you should separate each generated keyword with a comma ",".
             Remember, only generate at most {} keywords.
+            Next, you always output "####", and then you summarize these generated keywords with a topic name.
+            This topic name should be one or two representative and meaningful words, do not generate more than two words.
             Then terminate your generation, you should never generate any other words.
             CONTENT: {}'''
 

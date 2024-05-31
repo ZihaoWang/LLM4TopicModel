@@ -108,6 +108,7 @@ class PPO_Model(object):
                     return_prompt=False,
                     **self.generate_kwargs)
             batch_response = self.tokenizer.batch_decode(response_tensors, skip_special_tokens=True)
+            batch_response, topic_response = self.__postprocess(batch_response)
            
             reward = self.__get_reward(batch_response, batch['topic_id'])
             stats = self.ppo_trainer.step(query_tensors, response_tensors, reward)
@@ -145,17 +146,19 @@ class PPO_Model(object):
         for epoch, batch in tqdm(enumerate(self.ppo_trainer.dataloader)):
             query_tensors = batch["input_ids"]
 
-            response_tensors = self.ppo_trainer.generate(query_tensors)#, max_new_tokens = self.args.output_max_len)
+            response_tensors = self.ppo_trainer.generate(query_tensors)
             batch_response = self.tokenizer.batch_decode(response_tensors, skip_special_tokens=True)
-            batch_response = self.__postprocess(batch_response)
+            batch_response, topic_response = self.__postprocess(batch_response)
             
             reward = self.__get_reward(batch_response, batch['topic_id'])
             all_reward += reward.tolist()
 
-            for q, r in zip(batch['query'], batch_response):
-                logging.info(q)
+            for q, r, t in zip(batch['query'], batch_response, topic_response):
+                logging.info('INPUT QUERY: ' + q)
                 logging.info('**********************')
-                logging.info(r)
+                logging.info('OUTPUT KEYWORDS: ' + r)
+                logging.info('**********************')
+                logging.info('OUTPUT TOPIC: ' + t)
                 logging.info('\n---------------------------\n')
 
         avg_reward = T.mean(T.tensor(all_reward))
@@ -196,7 +199,7 @@ class PPO_Model(object):
         return all_reward
 
     def __postprocess(self,
-            batch_response: List[str]) -> List[str]:
+            batch_response: List[str]) -> Tuple[List[str], str]:
         '''
         Process the format of generated texts from the LLM.
 
@@ -206,21 +209,32 @@ class PPO_Model(object):
                 Returns:
                         clean_responses: the processed responses, containing
                         at most num_generate_keywords keywords.
+                        topics: the representative topic name for these keywords.
         '''
         clean_responses = []
+        topics = []
         for res in batch_response:
             res = res.strip().lower().split('keywords:')
             if len(res) != 2:
                 clean_responses.append(self.tokenizer.eos_token)
+                topics.append(self.tokenizer.eos_token)
                 continue
-            res = res[1]
-            if res[-1] == '.':
-                res = res[:-1]
-            res = res.split(',')[:self.args.num_generate_keywords]
-            res = ','.join(res)
-            clean_responses.append(res)
+            res = res[1].split('####')
+            if len(res) != 2:
+                clean_responses.append(self.tokenizer.eos_token)
+                topics.append(self.tokenizer.eos_token)
+                continue
 
-        return clean_responses
+            keywords, topic = res
+            if keywords[-1] == '.':
+                keywords = keywords[:-1]
+            keywords = keywords.split(',')[:self.args.num_generate_keywords]
+            keywords = ','.join(keywords)
+            clean_responses.append(keywords)
+
+            topics.append(topic.strip())
+
+        return clean_responses, topics
 
 
 
