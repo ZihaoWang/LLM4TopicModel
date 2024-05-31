@@ -19,19 +19,19 @@ Or give some CLI arguments:
 
     * python main.py --num_generate_keywords 10 --ppo_epochs 2 
 
-You can find all arguments and their descriptions in the args.py.
+You can find all the arguments and their descriptions in args.py.
 
 # Dataset
 
-There is no suitable datasets with dynamic topic names and keywords online, so we create a dataset from scratch.
+There are no suitable datasets with dynamic topic names and keywords online, so we create a dataset from scratch.
 
 1. We use the [Yahoo Answers Topics](https://huggingface.co/datasets/yahoo_answers_topics) dataset, which is constructed using 10 largest main categories. Each class contains 140,000 training samples and 6,000 testing samples. From each sample, we use the **topic id** and **best answer** fields as categories and documents. We get --corpus_sample_size samples and create three datasets:
 
-    * Training dataset: each document belongs to one of --num_seen_topic **seen topics**, and there are --finetune_size_per_label documents per seen topic.
+    * Training dataset: Each document belongs to one of --num_seen_topic **seen topics**, and there are --finetune_size_per_label documents per seen topic.
 
-    * Seen testing dataset: contains remaining document belonging to one of --num_seen_topic **seen topics**.
+    * Seen testing dataset: It contains remaining document belonging to one of --num_seen_topic **seen topics**.
 
-    * Unseen testing dataset: contains all documents belonging to the remaining **unseen topics**.
+    * Unseen testing dataset: It contains all documents belonging to the remaining **unseen topics**.
 
 In this way, we can evaluate the performance of our fine-tuned LLM on both seen documents of topics and unseen topics. The number of seen topics is 8 by default.
 
@@ -66,15 +66,15 @@ CONTENT: {document}*
 
 
 # Fine tuning of the LLM
-Instead of supervised fine-tuning, we use Proximal Policy Optimization (PPO) to fine-tuning our LLM as we do not have direct supervision signals. The PPO fine-tuning process can be described as:
+Instead of supervised fine-tuning, we use Proximal Policy Optimization (PPO) to fine-tune our LLM as we do not have direct supervision signals. The PPO fine-tuning process can be described as:
 
-1. Given each tokenized input in the step 3 above, the LLM generates a response including a topic name and several **response keywords**.
+1. Given each tokenized input in step 3 above, the LLM generates a response including a topic name and several **response keywords**.
 
-2. From topic words corresponding to the topic id of the document in the step 2 above, we sample several **targeting keywords**.
+2. From topic words corresponding to the topic id of the document in step 2 above, we sample several **targeting keywords**.
 
-3. We create a simple reward model by firstly encoding both **response keywords** and **targeting keywords** into embeddings with the same embedding model all-MiniLM-L6-V2 in the Bunka, and then we compute the cosine similarity of them as the reward.
+3. We create a simple reward model by first encoding both **response keywords** and **targeting keywords** into embeddings with the same embedding model all-MiniLM-L6-V2 in the Bunka, and then we compute the cosine similarity of them as the reward.
 
-4. The **response keywords**, **targeting keywords** and rewards are used in the updating process of PPO.
+4. The **response keywords**, **targeting keywords**, and rewards are used in the PPO update process.
 
 During the PPO fine-tuning, I used QLORA and quantized the LLM into 4 bits.
 
@@ -84,8 +84,8 @@ We evaluate on both seen and unseen testing dataset to check the performance of 
 
 # Future improvements
 
-1. The format of generated responses from the LLM are sometimes (10% - 20%) not stable. For example, it continually generates subsequent words of the input prompt before useful keywords and topic names. Creating a labeled dataset with correct formats and performing supervised fine-tuning before PPO can solve this issue.
+1. The format of LLM-generated responses is sometimes unstable (10% - 20%). For example, it continually generates subsequent words of the input prompt before useful keywords and topic names. Create a labeled dataset with correct formats and perform supervised fine-tuning before PPO can solve this issue.
 
-2. The simple cosine rewarding model can be replaced with another deep network or LLM. Train the rewarding model before the PPO fine-tuning can obtain better performances
+2. The simple cosine rewarding model can be replaced with another deep network or LLM. Train the rewarding model before the PPO fine-tuning can obtain better performances.
 
-3. According to recent information of how Meta pre-trained Llama3, further fine-tuning the LLM with DPO after PPO can further improve the performance.
+3. According to recent information on how Meta pre-trained Llama3, we can further fine-tune the LLM with the Direct Performance Optimization (DPO) after PPO to improve the performance.
