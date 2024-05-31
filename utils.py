@@ -31,7 +31,9 @@ def init_env_args_logging() -> Namespace:
 
     args = get_args()
     
-    log_path = os.path.join(args.log_root, "topic_llama3.log")
+    timestamp = str(time.time()).split('.')[0]
+    do_test = 'test' if args.test else 'train'
+    log_path = os.path.join(args.log_root, f"topic_llama_{do_test}_{timestamp}.log")
     # file logger
     logging.basicConfig(
         format="%(asctime)s %(levelname)-8s %(message)s",

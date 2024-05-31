@@ -1,3 +1,4 @@
+import logging
 from argparse import Namespace
 import random
 from typing import List, Tuple, Set, Dict
@@ -9,13 +10,14 @@ from trl import (
         AutoModelForCausalLMWithValueHead
         )
 from transformers import (
-        pipeline, AutoTokenizer,
+        pipeline, AutoTokenizer, AutoModelForCausalLM,
         BitsAndBytesConfig, TrainingArguments
         )
 from datasets import load_dataset, Dataset
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 from peft import LoraConfig
+from transformers import BitsAndBytesConfig
 from accelerate import Accelerator
 
 class PPO_Model(object):
@@ -67,15 +69,24 @@ class PPO_Model(object):
         self.tokenizer.pad_token = self.tokenizer.eos_token
 
         self.embedding_model = SentenceTransformer(self.args.topic_emb_model)
-        self.ppo_saving_path = self.args.result_root + 'ppo_trainer_' + self.args.llm_model.replace('/', '_')
+        self.ppo_saving_path = self.args.result_root + 'ppo_trainer_' + self.args.llm_model.replace('/', '_') 
 
         self.generate_kwargs = {
-                'max_length': 2048, # max length of output
+                'max_new_tokens': 32,
+                'min_new_tokens': 8,
                 'do_sample': True, # non-greedy decoding
                 'pad_token_id': self.tokenizer.pad_token_id,
+                'use_cache': None,
                 'temperature': 1.0
                 }
         
+        self.nf4_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=T.bfloat16
+                )
+
     def train(self, train_dataset: Dataset):
         '''
         For fine-tuning the LLM with the PPO algorithm.
@@ -91,8 +102,8 @@ class PPO_Model(object):
 
         llm_model = AutoModelForCausalLMWithValueHead.from_pretrained(
                 self.ppo_config.model_name,
-                #load_in_8bit=True,
-                load_in_4bit=True,
+                load_in_8bit=True,
+                #quantization_config=self.nf4_config,
                 device_map={'': self.current_device},
                 peft_config=self.lora_config)
 
@@ -102,18 +113,29 @@ class PPO_Model(object):
                 dataset=train_dataset,
                 data_collator=collator,)
 
-        for epoch, batch in tqdm(enumerate(self.ppo_trainer.dataloader)):
+        self.generate_kwargs['use_cache'] = False
+        for i_batch, batch in enumerate(self.ppo_trainer.dataloader):
             query_tensors = batch["input_ids"]
 
-            response_tensors = self.ppo_trainer.generate(query_tensors,
-                    return_prompt=False,
-                    **self.generate_kwargs)
+            try:
+                response_tensors = self.ppo_trainer.generate(query_tensors,
+                        return_prompt=False,
+                        **self.generate_kwargs)
+            except RuntimeError as ex:
+                logging.warning(ex)
+                logging.warning(batch)
+                continue
+
             batch_response = self.tokenizer.batch_decode(response_tensors, skip_special_tokens=True)
             batch_response, topic_response = self.__postprocess(batch_response)
            
             reward = self.__get_reward(batch_response, batch['topic_id'])
             stats = self.ppo_trainer.step(query_tensors, response_tensors, reward)
-            self.ppo_trainer.log_stats(stats, batch, reward)
+
+            if i_batch % 2 == 0:
+                logging.info(f'{i_batch} batches has processed')
+                self.ppo_trainer.save_pretrained(self.ppo_saving_path)
+                logging.info(f'saving ppo trainer at {self.ppo_saving_path}')
 
         self.ppo_trainer.save_pretrained(self.ppo_saving_path)
         logging.info(f'saving ppo trainer at {self.ppo_saving_path}')
@@ -133,26 +155,31 @@ class PPO_Model(object):
 
         llm_model = AutoModelForCausalLMWithValueHead.from_pretrained(
                 self.ppo_saving_path,
-                load_in_8bit=True,
+                #load_in_8bit=True,
+                #quantization_config=self.nf4_config,
                 device_map={'': self.current_device},
                 peft_config=self.lora_config)
 
+        self.ppo_config.batch_size = self.args.test_batch_size
         self.ppo_trainer = PPOTrainer(self.ppo_config,
                 llm_model,
                 tokenizer=self.tokenizer,
                 dataset=test_dataset,
                 data_collator=collator)
 
+        self.generate_kwargs['use_cache'] = True
         all_reward = []
         for epoch, batch in tqdm(enumerate(self.ppo_trainer.dataloader)):
             query_tensors = batch["input_ids"]
 
-            response_tensors = self.ppo_trainer.generate(query_tensors)
+            response_tensors = self.ppo_trainer.generate(query_tensors,
+                        return_prompt=False,
+                        **self.generate_kwargs)
             batch_response = self.tokenizer.batch_decode(response_tensors, skip_special_tokens=True)
             batch_response, topic_response = self.__postprocess(batch_response)
             
             reward = self.__get_reward(batch_response, batch['topic_id'])
-            all_reward += reward.tolist()
+            all_reward += reward
 
             for q, r, t in zip(batch['query'], batch_response, topic_response):
                 logging.info('INPUT QUERY: ' + q)

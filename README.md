@@ -13,13 +13,21 @@ Specifically, after fine-tuning, the LLM can DYNAMICALLY generate a meaningful t
 
 2. Now you can run the model within the CLI interface of Docker:
 
+Fine-tune an LLM with the PPO algorithm and save the fine-tuned LLM under the result/:
+
     * python main.py
 
-Or give some CLI arguments:
+Or give some additional arguments:
 
     * python main.py --num_generate_keywords 10 --ppo_epochs 2 
 
 You can find all the arguments and their descriptions in args.py.
+
+Then, you can evaluate the fine-tuned model on both testing datasets with seen and unseen topics by adding **--test**:
+
+    * python main.py --test --test_batch_size 64
+
+The logs for fine-tuning and evaluation results can be viewed under log/.
 
 # Dataset
 
@@ -81,10 +89,31 @@ During the PPO fine-tuning, I used QLORA and quantized the LLM into 4 bits.
 # Evaluation
 
 We evaluate on both seen and unseen testing dataset to check the performance of our PPO fine-tuning.
+Specifically, we use the averaging reward score on the testing dataset as a metric.
+Since we used cosine similarity as reward function, averaging reward score approching to 1 means the generated topic is highly relevant to the result of topic model.
+
+The averaging reward score on the seen and unseen testing datasets are 0.37 and 0.29, respectively.
+The results show that the LLM performs better on seen topics during fine-tuning, but it still has some generalization to the unseen topics.
+
+Here are some topics found by LLM:
+
+1. If you only have an undergraduate degree, your best bet is to volunteer at a university graduate program.  Professors with research can always use
+ volunteers to assist in the lab research.  You can build up experience that way.
+
+    * KEYWORDS:  volunteer, assist, research, experience, university
+
+    * TOPIC: lab volunteer
+
+2.  Also called a "sound board" or "audio adapter," it is a plug-in card that records and plays back sound. Supporting both digital audio and MIDI, so
+und cards provide an input port for a microphone or other sound source and output ports to speakers and amplifiers.
+
+    * KEYWORDS:  recording, playback, digital audio, midi, sound source.
+
+    * TOPIC: sound card.
 
 # Future improvements
 
-1. The format of LLM-generated responses is sometimes unstable (10% - 20%). For example, it continually generates subsequent words of the input prompt before useful keywords and topic names. Create a labeled dataset with correct formats and perform supervised fine-tuning before PPO can solve this issue.
+1. The format of LLM-generated responses is sometimes unstable (20% - 30%). For example, it continually generates subsequent words of the input prompt before useful keywords and topic names. Also, it generates much more topics other than the result from the topic model. Create a labeled dataset with correct formats and perform supervised fine-tuning before PPO can solve both issues.
 
 2. The simple cosine rewarding model can be replaced with another deep network or LLM. Train the rewarding model before the PPO fine-tuning can obtain better performances.
 

@@ -23,13 +23,14 @@ def run(args: Namespace):
             data_processor.get_datasets()
 
     model = PPO_Model(args, topic_words)
-    model.train(train_dataset)
+    if not args.test:
+        model.train(train_dataset)
+    else:
+        logging.info('***********\nEvaluate on the testing set with seen topics in training set.\n**************')
+        model.test(seen_test_dataset)
 
-    logging.info('***********\nEvaluate on the testing set with seen topics in training set.\n**************')
-    model.test(seen_test_dataset)
-
-    logging.info('***********\nEvaluate on the testing set with unseen topics in training set.\n**************')
-    model.test(unseen_test_dataset)
+        logging.info('***********\nEvaluate on the testing set with unseen topics in training set.\n**************')
+        model.test(unseen_test_dataset)
 
 if __name__ == "__main__":
     args = init_env_args_logging()

@@ -131,10 +131,11 @@ class DataProcessor(object):
         corpus_unseen = defaultdict(list)
         for doc in corpus_with_topic:
             topic = doc.topic_id
+            content = doc.content[:self.args.max_doc_length]
             if topic in seen_topics:
-                corpus_seen[topic].append(doc.content)
+                corpus_seen[topic].append(content)
             else:
-                corpus_unseen[topic].append(doc.content)
+                corpus_unseen[topic].append(content)
 
         max_train_num = int(topic_info['size'].min() * 0.8)
 
@@ -198,7 +199,7 @@ class DataProcessor(object):
         tokenizer = transformers.AutoTokenizer.from_pretrained(self.args.llm_model, padding_side='left')
         tokenizer.pad_token = tokenizer.eos_token
 
-        def transform_dataset(split: Dict[str, List[str]]) -> Dataset:
+        def transform_dataset(split: Dict[str, List[str]]) -> (Dataset, int):
             dataset = defaultdict(list)
             for tid, contents in split.items():
                 for content in contents:
