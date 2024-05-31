@@ -13,8 +13,21 @@ import pickle
 from args import get_args
 
 class DataProcessor(object):
+    '''
+    The class for loading, transforming raw data, creating topic information and generating datasets.
+
+            Methods:
+                    get_datasets(): get training, seen testing and unseen testing datasets, and topic information.
+    '''
 
     def __init__(self, args: Namespace):
+        '''
+        Constructor for DataProcessor.
+
+                Parameters:
+                        args: all the arguments.
+        '''
+
         self.args = args
         
         yahoo_dataset = load_dataset(self.args.corpus_name)['train']
@@ -50,13 +63,129 @@ class DataProcessor(object):
             self.__generate_llm_dataset(split_train, split_seen_test, split_unseen_test, topic_info)
 
     def get_datasets(self) -> Tuple[Dataset, Dataset, Dataset, Dict[str, List[str]]]:
+        '''
+        Get training, seen testing and unseen testing datasets, and topic information.
+
+                Parameters:
+                        None
+
+                Returns:
+                        self.train_dataset: training dataset.
+                        self.seen_test_dataset: testing dataset with seen topics in the training dataset.
+                        self.unseen_test_dataset: testing dataset with seen topics in the training dataset.
+                        self.topic_words: a dict of topic ids and corresponding topic words.
+        '''
         return self.train_dataset, self.seen_test_dataset, self.unseen_test_dataset, self.topic_words
+
+    def __fit_topics(self, raw_corpus: List[str]) -> Tuple[List[Document], DataFrame]:
+        '''
+        Unsupervisely extract topic information with Bunka.
+
+                Parameters:
+                        raw_corpus: a list of raw corpus.
+
+                Returns:
+                        corpus_with_topic: list of corpus processed by Bunka.
+                        topic_info: a dict of topic ids and their topic words.
+        '''
+        embedding_model = SentenceTransformer(self.args.topic_emb_model)
+        bunka_path = self.args.tmp_root + "bunka_dumps"
+        bunka = Bunka(embedding_model=embedding_model)
+        if os.path.exists(bunka_path):
+            logging.info(f"load bunka from {bunka_path}")
+            bunka = bunka.load_bunka(path=bunka_path)
+        else:
+            bunka.fit(raw_corpus)
+            logging.info(f"save bunka to {bunka_path}")
+            bunka.save_bunka(bunka_path)
+
+        topic_info = bunka.get_topics(n_clusters = self.args.num_corpus_topic, name_length = 100)
+        corpus_with_topic = bunka.docs
+        #print(topic_info)
+        #print(corpus_with_topic[0].topic_id)
+        #print(corpus_with_topic[0].content)
+
+        return corpus_with_topic, topic_info
+
+    def __sample_split(self,
+            corpus_with_topic: List[Document],
+            topic_info: DataFrame,
+            seen_topics: Set[str],
+            unseen_topics: Set[str]) -> Tuple[Dict[str, List[str]]]:
+        '''
+        Create training and testing splits with seen and unseen topics.
+
+                Parameters:
+                        corpus_with_topic: list of corpus processed by Bunka.
+                        topic_info: a dict of topic ids and their topic words.
+                        seen_topics: seen topic ids from training.
+                        unseen_topics: unseen topic ids from training.
+
+                Returns:
+                        split_train: training split.
+                        split_seen_test: testing split with seen topics.
+                        split_unseen_test: testing split with unseen topics.
+        '''
+
+        corpus_seen = defaultdict(list)
+        corpus_unseen = defaultdict(list)
+        for doc in corpus_with_topic:
+            topic = doc.topic_id
+            if topic in seen_topics:
+                corpus_seen[topic].append(doc.content)
+            else:
+                corpus_unseen[topic].append(doc.content)
+
+        max_train_num = int(topic_info['size'].min() * 0.8)
+
+        split_train = {}
+        split_seen_test = {}
+        split_unseen_test = {}
+
+        for topic_id, contents in corpus_seen.items():
+            split_train[topic_id] = contents[:max_train_num]
+            split_seen_test[topic_id] = contents[max_train_num:]
+        for topic_id, contents in corpus_unseen.items():
+            split_unseen_test[topic_id] = contents
+
+        return split_train, split_seen_test, split_unseen_test
+            
+    def __split_topics(self,
+            topic_info: DataFrame) -> Tuple[Set[str], Set[str]]:
+        '''
+        Split topics into num_seen_topic topics in training and seen testing sets,
+        and remaining topics belong to unseen testing sets.
+
+                Parameters:
+                        topic_info: topic information from Bunka.
+
+                Returns:
+                        seen_topic: seen topic ids.
+                        unseen_topic: unseen topic ids.
+        '''
+        seen_topic = topic_info['topic_id'][:self.args.num_seen_topic]
+        unseen_topic = topic_info['topic_id'][self.args.num_seen_topic:]
+        seen_topic, unseen_topic = set(seen_topic), set(unseen_topic)
+
+        return seen_topic, unseen_topic
 
     def __generate_llm_dataset(self,
             split_train: Dict[str, List[str]],
             split_seen_test: Dict[str, List[str]],
             split_unseen_test: Dict[str, List[str]],
             topic_info: DataFrame):
+        '''
+        Create LLM datasets using a prompt template.
+
+                Parameters:
+                        split_train: training split.
+                        split_seen_test: testing split with seen topics.
+                        split_unseen_test: testing split with unseen topics.
+                        topic_info: topic information from Bunka.
+
+                Returns:
+                        None
+        '''
 
         prompt = '''You are a helpful assistant that must try your best effort to summarize {} keywords representing main topic of the CONTENT.
             Your output always starts with "KEYWORDS:", then you should separate each generated keyword with a comma ",".
@@ -98,63 +227,6 @@ class DataProcessor(object):
             dataset = (self.train_dataset, self.seen_test_dataset, self.unseen_test_dataset, self.topic_words)
             pickle.dump(dataset, f_dst, pickle.HIGHEST_PROTOCOL)
         logging.info(f'save dataset to {self.dataset_path}')
-
-    def __fit_topics(self, raw_corpus: List[str]) -> Tuple[List[Document], DataFrame]:
-        embedding_model = SentenceTransformer(self.args.topic_emb_model)
-        bunka_path = self.args.tmp_root + "bunka_dumps"
-        bunka = Bunka(embedding_model=embedding_model)
-        if os.path.exists(bunka_path):
-            logging.info(f"load bunka from {bunka_path}")
-            bunka = bunka.load_bunka(path=bunka_path)
-        else:
-            bunka.fit(raw_corpus)
-            logging.info(f"save bunka to {bunka_path}")
-            bunka.save_bunka(bunka_path)
-
-        topic_info = bunka.get_topics(n_clusters = self.args.num_corpus_topic, name_length = 100)
-        corpus_with_topic = bunka.docs
-        #print(topic_info)
-        #print(corpus_with_topic[0].topic_id)
-        #print(corpus_with_topic[0].content)
-
-        return corpus_with_topic, topic_info
-
-    def __sample_split(self,
-            corpus_with_topic: List[Document],
-            topic_info: DataFrame,
-            seen_topics: Set[str],
-            unseen_topics: Set[str]) -> Tuple[Dict[str, List[str]]]:
-
-        corpus_seen = defaultdict(list)
-        corpus_unseen = defaultdict(list)
-        for doc in corpus_with_topic:
-            topic = doc.topic_id
-            if topic in seen_topics:
-                corpus_seen[topic].append(doc.content)
-            else:
-                corpus_unseen[topic].append(doc.content)
-
-        max_train_num = int(topic_info['size'].min() * 0.8)
-
-        split_train = {}
-        split_seen_test = {}
-        split_unseen_test = {}
-
-        for topic_id, contents in corpus_seen.items():
-            split_train[topic_id] = contents[:max_train_num]
-            split_seen_test[topic_id] = contents[max_train_num:]
-        for topic_id, contents in corpus_unseen.items():
-            split_unseen_test[topic_id] = contents
-
-        return split_train, split_seen_test, split_unseen_test
-            
-    def __split_topics(self,
-            topic_info: DataFrame) -> Tuple[Set[str], Set[str]]:
-        seen_topic = topic_info['topic_id'][:self.args.num_seen_topic]
-        unseen_topic = topic_info['topic_id'][self.args.num_seen_topic:]
-        seen_topic, unseen_topic = set(seen_topic), set(unseen_topic)
-
-        return seen_topic, unseen_topic
 
 
 

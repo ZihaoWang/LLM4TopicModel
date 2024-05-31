@@ -1,7 +1,14 @@
 import argparse
+from argparse import Namespace
 
-def get_args():
-    parser = argparse.ArgumentParser(description = "Topic Modeling with Llama3")
+def get_args() -> Namespace:
+    '''
+    CLI arguments in this model.
+
+    Returns:
+            args: all parsed arguments.
+    '''
+    parser = argparse.ArgumentParser(description = "Topic Modeling by fine-tuning LLMs")
 
     parser.add_argument("--log_root", default = "./log/", type = str, help = "Directory of logs")
     parser.add_argument("--data_root", default = "./data/", type = str, help = "Directory of data")

@@ -8,10 +8,14 @@ from collections.abc import Iterable
 
 from args import get_args
 
-T = TypeVar("T")
-U = TypeVar("U")
-
 def init_env_args_logging() -> Namespace:
+    '''
+    Setting up environments and the log, parsing arguments, 
+
+            Return:
+                    args: all parsed arguments.
+    '''
+
     os.environ['OPENBLAS_NUM_THREADS'] = '56'
 
     '''
@@ -27,10 +31,6 @@ def init_env_args_logging() -> Namespace:
 
     args = get_args()
     
-    os.makedirs(args.log_root, exist_ok = True)
-    os.makedirs(args.result_root, exist_ok = True)
-    os.makedirs(args.tmp_root, exist_ok = True)
-
     log_path = os.path.join(args.log_root, "topic_llama3.log")
     # file logger
     logging.basicConfig(
