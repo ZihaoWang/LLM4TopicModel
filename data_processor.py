@@ -1,7 +1,13 @@
-from collections import defaultdict
+import logging
+from pandas import DataFrame
+from langchain.docstore.document import Document
+from collections import defaultdict, Counter
 from datasets import load_dataset, Dataset
 from argparse import Namespace
-from typing import List, Tuple
+from typing import List, Tuple, Set, Dict
+from bunkatopics import Bunka
+from sentence_transformers import SentenceTransformer
+import transformers
 import os
 import pickle
 from args import get_args
@@ -11,58 +17,145 @@ class DataProcessor(object):
     def __init__(self, args: Namespace):
         self.args = args
         
-        raw_data = load_dataset(self.args.corpus_name)
-        raw_train = raw_data['train']
-        raw_test = raw_data['test']
+        yahoo_dataset = load_dataset(self.args.corpus_name)['train']
+        raw_corpus = []
+        for i in range(yahoo_dataset.shape[0]):
+            if i >= self.args.corpus_sample_size:
+                break
+            data = yahoo_dataset[i]
+            raw_corpus.append(data['best_answer'])
+        
+        corpus_with_topic, topic_info = self.__fit_topics(raw_corpus)
+        seen_topic, unseen_topic = self.__split_topics(topic_info)
 
         #print(self.train_set.shape, self.train_set.column_names)
         #print(self.train_set[0])
         #print(self.test_set.shape, self.test_set.column_names)
 
-        corpus_path = self.args.tmp_root + "corpus_sample.pkl"
-        if os.path.exists(corpus_path):
-            with open(corpus_path, "rb") as f_src:
-                corpus_train, corpus_test = pickle.load(f_src)
+        split_path = self.args.tmp_root + "split_sample.pkl"
+        if os.path.exists(split_path):
+            with open(split_path, "rb") as f_src:
+                split_train, split_seen_test, split_unseen_test = pickle.load(f_src)
         else:
-            corpus_train, corpus_test = self.__sample_corpus(raw_train, raw_test)
-            with open(corpus_path, "wb") as f_dst:
-                pickle.dump((corpus_train, corpus_test), f_dst, pickle.HIGHEST_PROTOCOL)
+            split_train, split_seen_test, split_unseen_test = self.__sample_split(corpus_with_topic, topic_info, seen_topic, unseen_topic)
+            with open(split_path, "wb") as f_dst:
+                pickle.dump((split_train, split_seen_test, split_unseen_test), f_dst, pickle.HIGHEST_PROTOCOL)
 
-        print(len(corpus_train), len(corpus_test))
+        self.dataset_path = self.args.tmp_root + f"dataset_{self.args.llm_model}.pkl".replace('/', '_')
+        if os.path.exists(self.dataset_path):
+            with open(self.dataset_path, "rb") as f_src:
+                self.train_dataset, self.seen_test_dataset, self.unseen_test_dataset, self.topic_words = pickle.load(f_src)
+            logging.info(f'load dataset from {self.dataset_path}')
+        else:
+            self.__generate_llm_dataset(split_train, split_seen_test, split_unseen_test, topic_info)
 
-    def __sample_corpus(self,
-            raw_train: Dataset,
-            raw_test: Dataset) -> Tuple[List[str]]:
-        train_sample = defaultdict(list)
-        test_sample = defaultdict(list)
-        train_num, test_num = 0, 0
-        max_train_num = self.args.num_corpus_label * self.args.finetune_size_per_label
-        max_test_num = self.args.num_corpus_label * self.args.test_size_per_label 
-        for i in range(raw_train.shape[0]):
-            if train_num >= max_train_num:
-                break
-            data = raw_train[i]
-            if len(train_sample[data['topic']]) < self.args.finetune_size_per_label:
-                train_sample[data['topic']].append(data['best_answer'])
-                train_num += 1
+    def get_datasets(self) -> Tuple[Dataset, Dataset, Dataset, Dict[str, List[str]]]:
+        return self.train_dataset, self.seen_test_dataset, self.unseen_test_dataset, self.topic_words
 
-        for i in range(raw_test.shape[0]):
-            if test_num >= max_test_num:
-                break
-            data = raw_test[i]
-            if len(test_sample[data['topic']]) < self.args.test_size_per_label:
-                test_sample[data['topic']].append(data['best_answer'])
-                test_num += 1
+    def __generate_llm_dataset(self,
+            split_train: Dict[str, List[str]],
+            split_seen_test: Dict[str, List[str]],
+            split_unseen_test: Dict[str, List[str]],
+            topic_info: DataFrame):
 
-        final_train, final_test = [], []
-        for topic, text_list in train_sample.items():
-            final_train += text_list
-        for topic, text_list in test_sample.items():
-            final_test += text_list
-        final_corpus = (final_train, final_test)
+        prompt = '''You are a helpful assistant that must try your best effort to summarize {} keywords representing main topic of the CONTENT.
+            Your output always starts with "KEYWORDS:", then you should separate each generated keyword with a comma ",".
+            Remember, only generate at most {} keywords.
+            Then terminate your generation, you should never generate any other words.
+            CONTENT: {}'''
 
-        return final_corpus
+        tokenizer = transformers.AutoTokenizer.from_pretrained(self.args.llm_model, padding_side='left')
+        tokenizer.pad_token = tokenizer.eos_token
+
+        def transform_dataset(split: Dict[str, List[str]]) -> Dataset:
+            dataset = defaultdict(list)
+            for tid, contents in split.items():
+                for content in contents:
+                    query = prompt.format(
+                            self.args.num_generate_keywords,
+                            self.args.num_generate_keywords,
+                            content
+                            )
+                    input_ids = tokenizer.encode(query)
+                    dataset['input_ids'].append(input_ids) 
+                    dataset['topic_id'].append(tid)
+                    dataset['query'].append(tokenizer.decode(input_ids))
             
+            dataset = Dataset.from_dict(dataset)
+            dataset.set_format(type='torch')
+            return dataset
+
+        self.topic_words = {}
+        for tid, twords in zip(topic_info['topic_id'], topic_info['topic_name']):
+            twords = twords.lower().replace(' | ', '|').split('|')
+            self.topic_words[tid] = twords
+
+        self.train_dataset = transform_dataset(split_train)
+        self.seen_test_dataset = transform_dataset(split_seen_test)
+        self.unseen_test_dataset = transform_dataset(split_unseen_test)
+
+        with open(self.dataset_path, "wb") as f_dst:
+            dataset = (self.train_dataset, self.seen_test_dataset, self.unseen_test_dataset, self.topic_words)
+            pickle.dump(dataset, f_dst, pickle.HIGHEST_PROTOCOL)
+        logging.info(f'save dataset to {self.dataset_path}')
+
+    def __fit_topics(self, raw_corpus: List[str]) -> Tuple[List[Document], DataFrame]:
+        embedding_model = SentenceTransformer(self.args.topic_emb_model)
+        bunka_path = self.args.tmp_root + "bunka_dumps"
+        bunka = Bunka(embedding_model=embedding_model)
+        if os.path.exists(bunka_path):
+            logging.info(f"load bunka from {bunka_path}")
+            bunka = bunka.load_bunka(path=bunka_path)
+        else:
+            bunka.fit(raw_corpus)
+            logging.info(f"save bunka to {bunka_path}")
+            bunka.save_bunka(bunka_path)
+
+        topic_info = bunka.get_topics(n_clusters = self.args.num_corpus_topic, name_length = 100)
+        corpus_with_topic = bunka.docs
+        #print(topic_info)
+        #print(corpus_with_topic[0].topic_id)
+        #print(corpus_with_topic[0].content)
+
+        return corpus_with_topic, topic_info
+
+    def __sample_split(self,
+            corpus_with_topic: List[Document],
+            topic_info: DataFrame,
+            seen_topics: Set[str],
+            unseen_topics: Set[str]) -> Tuple[Dict[str, List[str]]]:
+
+        corpus_seen = defaultdict(list)
+        corpus_unseen = defaultdict(list)
+        for doc in corpus_with_topic:
+            topic = doc.topic_id
+            if topic in seen_topics:
+                corpus_seen[topic].append(doc.content)
+            else:
+                corpus_unseen[topic].append(doc.content)
+
+        max_train_num = int(topic_info['size'].min() * 0.8)
+
+        split_train = {}
+        split_seen_test = {}
+        split_unseen_test = {}
+
+        for topic_id, contents in corpus_seen.items():
+            split_train[topic_id] = contents[:max_train_num]
+            split_seen_test[topic_id] = contents[max_train_num:]
+        for topic_id, contents in corpus_unseen.items():
+            split_unseen_test[topic_id] = contents
+
+        return split_train, split_seen_test, split_unseen_test
+            
+    def __split_topics(self,
+            topic_info: DataFrame) -> Tuple[Set[str], Set[str]]:
+        seen_topic = topic_info['topic_id'][:self.args.num_seen_topic]
+        unseen_topic = topic_info['topic_id'][self.args.num_seen_topic:]
+        seen_topic, unseen_topic = set(seen_topic), set(unseen_topic)
+
+        return seen_topic, unseen_topic
+
 
 
 if __name__ == "__main__":

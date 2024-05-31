@@ -9,19 +9,35 @@ def get_args():
     parser.add_argument("--tmp_root", default = "./tmp/", type = str, help = "Directory of temporary files.")
 
     parser.add_argument("--corpus_name", type = str, default = 'yahoo_answers_topics', help = "HuggingFace dataset of text corpus.")
-    parser.add_argument("--num_corpus_label", type = int, default = 10, help = "It is 10 from dataset info.")
-    parser.add_argument("--finetune_size_per_label", type = int, default = 200, help = "Size of corpus per label, for fine tuning.")
-    parser.add_argument("--test_size_per_label", type = int, default = 20, help = "Size of corpus per label, for testing.")
+    parser.add_argument("--corpus_sample_size", type = int, default = 3000, help = "")
+    parser.add_argument("--num_corpus_topic", type = int, default = 10, help = "It is 10 from dataset info.")
+    parser.add_argument("--num_seen_topic", type = int, default = 8, help = "")
+    parser.add_argument("--finetune_size_per_label", type = int, default = 100, help = "Size of corpus per label, for fine tuning.")
+    parser.add_argument("--test_size_per_label", type = int, default = 100, help = "Size of corpus per label, for testing.")
+    parser.add_argument("--keyword_sample_size", type = int, default = 200, help = "")
+    parser.add_argument("--num_generate_keywords", type = int, default = 5, help = "Number of generated keywords from LLM")
 
-    parser.add_argument("--parent_chunk_size", type = int, default = -1, choices = [-1, 1000], help = "")
-    parser.add_argument("--score_threshold", default = "0.5", type = float, help = "")
+    parser.add_argument("--topic_emb_model", type = str, default = 'all-MiniLM-L6-v2', help = "HuggingFace embedding model for Bunka.")
 
-    parser.add_argument("--idx_gpu", default = -1, type = int, help = "which cuda device to use (-1 for cpu training)")
+    parser.add_argument("--llm_model", type = str, default = 'daryl149/llama-2-7b-chat-hf', choices = ['daryl149/llama-2-7b-chat-hf', 'meta-llama/Meta-Llama-3-8B-Instruct'], help = "HuggingFace embedding model for LLM.")
+    parser.add_argument("--llm_lr", default = 1e-5, type = float, help = "learning rate")
+    parser.add_argument("--ppo_epochs", default = 4, type = int, help = "number of PPO training epochs")
+    parser.add_argument("--batch_size", default = 8, type = int, help = "batch size")
+    parser.add_argument("--mini_batch_size", default = 1, type = int, help = "PPO minibatch size")
+    parser.add_argument("--output_max_len", default = 32, type = int, help = "maximum length for LLM generation")
+    parser.add_argument("--gradient_accumulation_steps", default = 1, type = int, help = "in ppo training")
+    parser.add_argument("--early_stopping", default = False, type = bool, help = "in ppo training")
+    parser.add_argument("--target_kl", default = 0.1, type = float, help = "target KL divergence for early stopping")
+
+    parser.add_argument("--lora_r", default = 16, type = int, help = "")
+    parser.add_argument("--lora_alpha", default = 32, type = int, help = "")
+    parser.add_argument("--lora_dropout", default = 0.05, type = float, help = "")
+
+    #parser.add_argument("--idx_gpu", default = -1, type = int, help = "which cuda device to use (-1 for cpu training)")
 
     args = parser.parse_args()
 
-    args.data_path = args.data_root + "scraped_data.jsonl"
-    args.device = "cpu" if args.idx_gpu == -1 else f"cuda:{args.idx_gpu}"
+    #args.device = "cpu" if args.idx_gpu == -1 else f"cuda:{args.idx_gpu}"
 
     return args
 

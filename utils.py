@@ -12,14 +12,19 @@ T = TypeVar("T")
 U = TypeVar("U")
 
 def init_env_args_logging() -> Namespace:
+    os.environ['OPENBLAS_NUM_THREADS'] = '56'
+
+    '''
     secrets = {}
     with open("secrets.txt", "r") as f_src:
         for line in f_src:
             name, secret = line.strip().split("=")
             secrets[name] = secret
 
-    #from huggingface_hub import login
-    #login(token=secrets["huggingface_token"])
+    from huggingface_hub import login
+    login(token=secrets["huggingface_token"])
+    '''
+
     args = get_args()
     
     os.makedirs(args.log_root, exist_ok = True)

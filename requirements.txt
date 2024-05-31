@@ -1,12 +1,8 @@
+bunkatopics
 torch==2.0.1
-transformers
 peft
-numpy
-datasets
-accelerate
 evaluate
 bitsandbytes
-huggingface_hub
 trl
 tensorboard
-bunkatopics
+setuptools==69.5.1
