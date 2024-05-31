@@ -91,7 +91,8 @@ class PPO_Model(object):
 
         llm_model = AutoModelForCausalLMWithValueHead.from_pretrained(
                 self.ppo_config.model_name,
-                load_in_8bit=True,
+                #load_in_8bit=True,
+                load_in_4bit=True,
                 device_map={'': self.current_device},
                 peft_config=self.lora_config)
 
