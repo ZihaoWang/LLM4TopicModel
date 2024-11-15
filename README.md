@@ -1,4 +1,4 @@
-# SUMM AI NLP Challenge - Topic Modeling with LLM
+# Topic Modeling with LLM
 In this project, we fine-tune an open-source Large Language Model (LLM) to perform topic modeling on a collection of documents.
 
 Specifically, after fine-tuning, the LLM can DYNAMICALLY generate a meaningful topic name and several keywords for a given text. There are no sets of pre-defined topic names or keywords.
